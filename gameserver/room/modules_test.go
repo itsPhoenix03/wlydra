@@ -432,3 +432,37 @@ func TestCuttingASpanDropsTheRest(t *testing.T) {
 		t.Fatalf("the cut span refunded %d wood_planks, want 2 (one per segment)", got)
 	}
 }
+
+// A placement facing is 0–3 (src/rotation.ts); anything else is stored as 0, and
+// an older client's boolean `true` still means 1.
+func TestFacingDir(t *testing.T) {
+	cases := []struct {
+		in   any
+		want int
+	}{{nil, 0}, {float64(0), 0}, {float64(1), 1}, {float64(2), 2}, {float64(3), 3}, {float64(4), 0}, {float64(-1), 0}, {true, 1}, {false, 0}, {"x", 0}}
+	for _, c := range cases {
+		m := map[string]any{}
+		if c.in != nil {
+			m["dir"] = c.in
+		}
+		if got := facingDir(m); got != c.want {
+			t.Errorf("facingDir(%v) = %d, want %d", c.in, got, c.want)
+		}
+	}
+
+	f := newFixture(t)
+	f.stand(float64(f.r.spawn[0]), float64(f.r.spawn[1]), 0)
+	stock(f)
+	i := modTile(t, f, 0)
+	f.r.handleBuildMod(f.p, map[string]any{"t": "buildmod", "seq": float64(1), "i": float64(i), "kind": "mod_door", "slot": "wall", "dir": float64(2)})
+	mod, ok := f.r.moduleAt(i, "wall")
+	if !ok {
+		t.Fatalf("door was not placed: %v", f.lastOfType("modfail"))
+	}
+	if mod.Dir != 2 {
+		t.Fatalf("door facing stored as %d, want 2", mod.Dir)
+	}
+	if m := f.lastOfType("mod"); m == nil || m["dir"] != float64(2) {
+		t.Fatalf("mod broadcast lost the facing: %v", m)
+	}
+}

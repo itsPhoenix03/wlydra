@@ -1,6 +1,6 @@
 # Animation Improvement Guide
 
-This guide explains how to improve player, creature, tool, combat, gathering, digging, traversal, and world-feedback animations in Echoes of the Hearth. It is based on the current implementation in `src/rig.ts`, `src/main.ts`, `src/audio.ts`, and `server/index.js`.
+This guide explains how to improve player, creature, tool, combat, gathering, digging, traversal, and world-feedback animations in Wyldra. It is based on the current implementation in `src/rig.ts`, `src/main.ts`, `src/audio.ts`, and `server/index.js`.
 
 The current animation system is intentionally lightweight and procedural. Keep that advantage. The goal is not to introduce spritesheets or heavy skeletal middleware; the goal is to make the existing procedural rig behave like a body holding tools with weight, contact, anticipation, follow-through, and world interaction.
 

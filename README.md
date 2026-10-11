@@ -1,4 +1,4 @@
-# Echoes of the Hearth
+# Wyldra
 
 A co-op survival RPG in an isometric 2D world, played in the browser. Gather, build and
 survive the Blight across four island biomes, then light the four Monoliths and hold the

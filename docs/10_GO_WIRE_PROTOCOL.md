@@ -147,7 +147,9 @@ covers well beyond the viewport at any supported zoom.
 `localIdx` is `(y - cy*64) * 64 + (x - cx*64)`, range `0..4095`.
 
 `structs` entries are `[localIdx, kind, hp, dir, lvl]` — matching the legacy `init` tuple.
-`dir` drives fence and decor orientation on the client and must not be dropped.
+`dir` drives fence and decor orientation on the client and must not be dropped. It is a
+facing 0–3 (`src/rotation.ts`: front, mirrored, back, back mirrored — or the corner railing's
+four corners); the server stores any other value as 0.
 
 Omitted array fields mean empty. A chunk with no nodes may omit `"nodes"` entirely.
 
@@ -247,7 +249,7 @@ the `init`/chunk work of Slice 1.
 |---|---|---|
 | `gather` | `i, seq?, dx?, dy?` | 250 ms shared cooldown, range 2.5 |
 | `craft` | `r` | station must be within 4 tiles |
-| `build` | `i, kind, dir?` | range 6 |
+| `build` | `i, kind, dir?` | range 6, dir is a facing 0–3 (else 0) |
 | `dig` | `i, seq?, dx?, dy?` | `z=1` only, range 2, needs pick/spick |
 | `plant` / `harvest` | `i, crop?` | range 2.5, on a `farmplot` |
 | `furn` | `i, kind` | `z=1` (carved tile) — furniture lives in the mines only |
@@ -828,7 +830,7 @@ recipes. Nothing about a module ever enters `INV_KEYS`.
 
 | type | payload | notes |
 |---|---|---|
-| `buildmod` | `i, kind, slot, dir?, seq?` | range 6, `z=0`, dir is 0 or 1 |
+| `buildmod` | `i, kind, slot, dir?, seq?` | range 6, `z=0`, dir is a facing 0–3 (else 0) |
 
 Placement is refused — with nothing charged — when the kind is unknown, the slot
 does not fit the kind, the tile is water, a landmark, a medic hut or already

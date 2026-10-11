@@ -1,6 +1,6 @@
 # `.agents/` — coordination guide for AI agents on this project
 
-You are working on **Echoes of the Hearth**, a web-based 2D isometric co-op survival sandbox RPG.
+You are working on **Wyldra**, a web-based 2D isometric co-op survival sandbox RPG.
 This folder is the shared brain for every agent that touches the repo. Read it before doing anything.
 
 ---

@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { HUMAN_CLIPS, humanFrame } from './assets.ts';
 import { SHIRT_HEX, ensureSkin, skinId, skinKey, type Cloak } from './keeperSkins.ts';
+import { pickView, type View } from './facing.ts';
 
 /* ────────────────────────────────────────────────────────────────────────────
  * POSE MODEL — read this before touching anything below.
@@ -12,9 +13,11 @@ import { SHIRT_HEX, ensureSkin, skinId, skinKey, type Cloak } from './keeperSkin
  * keeperSkins.ts; every frame name below is resolved through the active skin.
  *
  * Hierarchy
- *   Rig (Container)          main.ts owns x / y / depth / setScale(±1) facing.
+ *   Rig (Container)          main.ts owns x / y / depth; face()/faceDir()/setView()
+ *                            set the facing, which tick() applies as setScale(±1).
  *                            The rig itself NEVER writes its own x/y.
- *   ├ hull (Image)           boat, only while boating (setBoat) — behind the keeper
+ *   ├ hull (Image)           boat, only while boating (setBoat) — behind the keeper; the
+ *                            hull for the view (HULL), so it points where they row
  *   ├ shadow (Ellipse)       ground shadow shown only mid-jump: the jump frames
  *   │                        have no drawn shadow, and this one stays on the
  *   │                        ground while bodyRoot rises.
@@ -34,13 +37,23 @@ import { SHIRT_HEX, ensureSkin, skinId, skinKey, type Cloak } from './keeperSkin
  *
  * TEXTURE PRIORITY (first match wins)
  *   action clip → swim loop → boat (row loop / resting) → walk loop → status loop (cold/hot/injured) → base
+ *
+ * VIEWS (src/facing.ts)
+ *   Every clip exists three times: keeper_<clip>_NN (front), keeper_back_<clip>_NN
+ *   and keeper_side_<clip>_NN, same frame count and timing, and the base pose
+ *   keeper / keeper_back / keeper_side. The current view picks the set; actions
+ *   aimed at something (main.ts faceDir) turn the keeper toward it first.
+ *   Side art faces right and is flipped for left; the back view is never flipped.
  * ──────────────────────────────────────────────────────────────────────────── */
 
 /** Kept for the create() call site; the keeper is SVG art now, nothing to generate. */
 export function makePartTextures(_scene: Phaser.Scene) {}
 
 const KEEPER_FRAMES: Record<string, string[]> = {};
-const ALL_FRAMES = ['keeper'];
+const ALL_FRAMES = ['keeper', 'keeper_back', 'keeper_side'];
+const BASE: Record<View, string> = { front: 'keeper', back: 'keeper_back', side: 'keeper_side' };
+/** The hull points where the keeper rows (tools/art/boat-views.mjs); each has a `_near` wall drawn over them. */
+const HULL: Record<View, string> = { front: 'boat_bow', back: 'boat_stern', side: 'boat_side' };
 for (const [c, a, n] of HUMAN_CLIPS) {
   if (c !== 'keeper') continue;
   KEEPER_FRAMES[a] = Array.from({ length: n }, (_, i) => humanFrame(c, a, i + 1));
@@ -141,6 +154,7 @@ export class Rig extends Phaser.GameObjects.Container {
   private hull: Phaser.GameObjects.Image | null = null;
   private hullFront: Phaser.GameObjects.Image | null = null;
   private facing = 1;
+  view: View = 'front';
   private status: RigStatus = null;
   private tex = '';
   private shirtIdx: number;
@@ -185,12 +199,20 @@ export class Rig extends Phaser.GameObjects.Container {
     scene.add.existing(this);
   }
 
-  // ── facing: cheap whole-container flip (unchanged contract) ──
+  // ── facing: left/right flip (applied in tick) and the view ──
+  /** Turn left/right only — actions aimed at a target; the view is left alone. */
   face(dx: number) {
     if (!dx) return;
     this.facing = dx < 0 ? -1 : 1;
-    this.setScale(this.facing, 1);
   }
+
+  /** Turn toward a screen-space travel vector: flip and view together. */
+  faceDir(dx: number, dy: number) {
+    this.face(dx);
+    this.view = pickView(dx, dy, this.view);
+  }
+
+  setView(v: View) { this.view = v; }
 
   // ── equipment: the clips draw their own prop; the held kind only sets heft ──
   hold(kind: string | null) {
@@ -212,8 +234,8 @@ export class Rig extends Phaser.GameObjects.Container {
       return;
     }
     if (!this.hull) {
-      this.hull = this.scene.add.image(0, BOAT_Y, 'boat').setOrigin(0.5, 0.6);
-      this.hullFront = this.scene.add.image(0, BOAT_Y, 'boat_front').setOrigin(0.5, 0.6);
+      this.hull = this.scene.add.image(0, BOAT_Y, HULL[this.view]).setOrigin(0.5, 0.6);
+      this.hullFront = this.scene.add.image(0, BOAT_Y, `${HULL[this.view]}_near`).setOrigin(0.5, 0.6);
       this.addAt(this.hull, 0);
       this.add(this.hullFront);
     }
@@ -309,8 +331,13 @@ export class Rig extends Phaser.GameObjects.Container {
     super.destroy(fromScene);
   }
 
+  /** Frames of `clip` in the current view (front art if a view lacks it). */
+  private frames(clip: string) {
+    return (this.view !== 'front' && KEEPER_FRAMES[`${this.view}_${clip}`]) || KEEPER_FRAMES[clip];
+  }
+
   private loopFrame(clip: string, spf: number) {
-    const f = KEEPER_FRAMES[clip];
+    const f = this.frames(clip);
     return f[Math.floor(this.loopT / spf) % f.length];
   }
 
@@ -331,7 +358,7 @@ export class Rig extends Phaser.GameObjects.Container {
 
     // 2. sample into plain-number locals (zero allocation).
     let bx = 0, by = 0, brot = 0, sy = 1, lift = 0;
-    let tex = 'keeper';
+    let tex = BASE[this.view];
 
     // ── ambient texture: swim > seated > status > base ──
     if (this.swim) {
@@ -339,7 +366,7 @@ export class Rig extends Phaser.GameObjects.Container {
       this.walkW = 0;
     } else if (this.seated) {
       // row while moving; otherwise rest with the paddle lifted out, breathing
-      const row = KEEPER_FRAMES.row;
+      const row = this.frames('row');
       tex = this.moving ? this.loopFrame('row', ROW_SPF) : row[4];
       if (!this.moving) {
         this.idlePhase += dt * 1.7;
@@ -372,7 +399,7 @@ export class Rig extends Phaser.GameObjects.Container {
       const c = this.clip, k = this.actInt, p = clamp01(this.actDur > 0 ? this.actT / this.actDur : 1);
       if (c.jump) {
         const J = JUMPS[this.actAnim] ?? JUMPS.jump;
-        const f = KEEPER_FRAMES[this.actAnim] ?? KEEPER_FRAMES.jump;
+        const f = this.frames(this.actAnim) ?? this.frames('jump');
         let i = 0;
         while (i < f.length - 1 && p >= J.at[i + 1]) i++;
         tex = f[i];
@@ -383,7 +410,7 @@ export class Rig extends Phaser.GameObjects.Container {
           by -= lift;
         }
       } else {
-        const f = KEEPER_FRAMES[this.actAnim];
+        const f = this.frames(this.actAnim);
         tex = f[Math.min(f.length - 1, Math.floor(p * f.length))];
         // impact accent peaks mid-clip, where the drawn strike lands
         const env = Math.sin(Math.PI * p);
@@ -403,7 +430,7 @@ export class Rig extends Phaser.GameObjects.Container {
 
     // 3. apply exactly once.
     // in water, any frame but the swim loop's own gets the underwater split
-    const wet = this.swim && !tex.startsWith('keeper_swim');
+    const wet = this.swim && !tex.includes('_swim_');
     tex = skinKey(tex, this.skin);
     if (tex !== this.tex || wet !== this.wet) {
       if (tex !== this.tex) this.spr.setTexture(tex);
@@ -421,6 +448,8 @@ export class Rig extends Phaser.GameObjects.Container {
     if (this.shadow.visible !== jumping) this.shadow.setVisible(jumping);
     if (jumping) this.shadow.setScale(1 - lift / 40).setAlpha(1 - lift / 30);
     if (this.hull) {
+      const hk = HULL[this.view];
+      if (this.hull.texture.key !== hk) { this.hull.setTexture(hk); this.hullFront!.setTexture(`${hk}_near`); }
       // hull bob + gentle roll; the keeper rides the same values
       this.boatT += dt;
       const bob = Math.sin(this.boatT * 3.2) * BOAT_BOB, roll = Math.sin(this.boatT * 2.1) * 0.025;
@@ -429,6 +458,9 @@ export class Rig extends Phaser.GameObjects.Container {
       by += BOAT_SEAT + bob;
       brot += roll;
     }
+    // only the back view keeps its own handedness; front art and side art flip
+    const fx = this.view === 'back' && tex.includes('_back') ? 1 : this.facing;
+    if (this.scaleX !== fx) this.setScale(fx, 1);
     this.bodyRoot.x = bx; this.bodyRoot.y = by; this.bodyRoot.rotation = brot;
     this.spr.scaleY = sy;
     if (this.wet) this.sprLow.scaleY = sy;

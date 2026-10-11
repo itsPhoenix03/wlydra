@@ -1,6 +1,6 @@
 # Map Expansion And Long-Distance Sailing Guide
 
-This guide explains how to expand Echoes of the Hearth from a compact archipelago into a much larger ocean map where sailing between major islands takes meaningful time, ideally about 2-3 minutes per major voyage. It is based on the current code in `shared/world.js`, `src/main.ts`, `server/index.js`, and `test.mjs`.
+This guide explains how to expand Wyldra from a compact archipelago into a much larger ocean map where sailing between major islands takes meaningful time, ideally about 2-3 minutes per major voyage. It is based on the current code in `shared/world.js`, `src/main.ts`, `server/index.js`, and `test.mjs`.
 
 The main goal is to make water travel feel like an expedition instead of a short crossing, while preserving the current architecture: deterministic shared world generation, server-authoritative gameplay, streamed client terrain chunks, and small procedural/SVG assets.
 

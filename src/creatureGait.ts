@@ -1,5 +1,6 @@
 import Phaser from "phaser";
-import { enemyFrame } from "./assets.ts";
+import { CRE_VIEWS, enemyFrame } from "./assets.ts";
+import { pickView, viewKey, type View } from "./facing.ts";
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Creature gait — walking and sprinting for every enemy type.
@@ -24,7 +25,11 @@ import { enemyFrame } from "./assets.ts";
  * the server's `cre` updates (spd, tiles/s) against the type's full hunting
  * speed. Idle amble (creature_ai.go: 40%) reads as a walk; a hunt at full speed,
  * a stalker's dart, an enraged charge read as a sprint, with a smooth blend.
- * Facing follows the travel, or turns to the keeper when close and still.
+ * Facing follows the travel, or turns to the keeper when close and still: a
+ * left/right flip plus the front / back / side art (src/facing.ts, CRE_VIEWS),
+ * each with its own motion set. creatureLookAt() turns a creature to something
+ * for a moment — its prey when it locks on, winds up, fires or pounces, the
+ * keeper who just hit it — and wins over both.
  * Purely cosmetic and client-local, like the leap layer that runs after it.
  * ──────────────────────────────────────────────────────────────────────────── */
 
@@ -75,12 +80,21 @@ export function sampleCreature(s: Phaser.GameObjects.Sprite, x: number, y: numbe
       const inst = Math.hypot(dx, dy) / dts;
       // a jump of many tiles is a respawn / knockback, not running
       if (inst < 15) s.setData("spd", (s.getData("spd") ?? 0) * 0.4 + inst * 0.6);
-      // screen-space horizontal travel is (dx - dy) in the iso projection
-      const sdx = dx - dy;
+      // screen-space travel in the iso projection: x is (dx - dy), y is (dx + dy) / 2
+      const sdx = dx - dy, sdy = (dx + dy) / 2;
       if (Math.abs(sdx) > 0.03) s.setData("gFace", sdx < 0 ? -1 : 1);
+      if (Math.abs(sdx) + Math.abs(sdy) > 0.04) s.setData("gView", pickView(sdx, sdy, s.getData("gView") ?? "front"));
     }
   }
   s.setData("sT", now);
+}
+
+/** Something a creature can turn toward: a rig, a sprite, or a fixed point (screen space). */
+export type LookTarget = { x: number; y: number };
+
+/** Turn the creature to face `target` for `secs` (it keeps tracking it if it moves). */
+export function creatureLookAt(s: Phaser.GameObjects.Sprite, target: LookTarget, secs: number) {
+  s.setData("gLookAt", target).setData("gLookT", secs);
 }
 
 /**
@@ -94,6 +108,7 @@ export function tickCreatureGait(
   dt: number,
   near: boolean,
   meX: number,
+  meY: number,
   inWater: boolean,
 ) {
   const g = CRE_GAIT[type] ?? CRE_GAIT.crawler;
@@ -108,12 +123,23 @@ export function tickCreatureGait(
   S += (sT - S) * Math.min(1, dt * 5);
   s.setData("gM", M).setData("gS", S);
 
-  // facing: travel direction; when close and holding still, the keeper
+  // facing: something it is looking at; else the travel direction; when close
+  // and holding still, the keeper
   let face: number = s.getData("gFace") ?? 1;
-  if (near && M < 0.3 && Math.abs(meX - s.x) > 6) face = meX < s.x ? -1 : 1;
-  s.setData("gFace", face);
+  let view: View = s.getData("gView") ?? "front";
+  const lookT: number = s.getData("gLookT") ?? 0;
+  const look: LookTarget | undefined = lookT > 0 ? s.getData("gLookAt") : undefined;
+  if (lookT > 0) s.setData("gLookT", lookT - dt);
+  const tx = look ? look.x : meX, ty = look ? look.y : meY;
+  if ((look || (near && M < 0.3)) && Math.hypot(tx - s.x, ty - s.y) > 6) {
+    if (Math.abs(tx - s.x) > 6) face = tx < s.x ? -1 : 1;
+    view = pickView(tx - s.x, ty - s.y, view);
+  }
+  s.setData("gFace", face).setData("gView", view);
   s.setFlipX(face < 0);
-  const dir = face;
+  // body lean and pitch read along the travel only in profile
+  const native = CRE_VIEWS[g.tex];
+  const dir = face * (!native || view === "side" ? 1 : 0.35);
 
   // stride clock: frames advance with speed; one cycle = 4 frames = 2 footfalls
   let phase: number = s.getData("gPhase") ?? 0;
@@ -125,9 +151,11 @@ export function tickCreatureGait(
   s.setData("gPhase", phase);
   const a = (phase / 4) * TAU;
 
-  // texture: the base art at rest, the motion set when moving
+  // texture: the base art at rest, the motion set when moving — for the view
+  let tex = native ? viewKey(g.tex, view, native) : g.tex;
+  if (!s.scene.textures.exists(tex)) tex = g.tex;
   const moving = g.style === "hover" || M > 0.06;
-  const key = moving ? enemyFrame(g.tex, PING[Math.floor(phase) % 4]) : g.tex;
+  const key = moving ? enemyFrame(tex, PING[Math.floor(phase) % 4]) : tex;
   if (s.texture.key !== key && s.scene.textures.exists(key)) s.setTexture(key);
 
   let sx = 1, sy = 1, rot = 0, lift = 0, hover = 0;
@@ -252,4 +280,64 @@ export function tickCreatureGait(
   s.setScale(base * sx, base * sy);
   s.setRotation(rot);
   s.setData("gHoverY", hover - lift);
+}
+
+/* ── wildlife ───────────────────────────────────────────────────────────────
+ * Animals wander at 0.5 tiles/s (animals.go: 0.1 per tick) and flee at their
+ * species' speed. They take the same samples as creatures (sampleCreature):
+ * ground speed and front / back / side view. Their walk sets are
+ * `<view key>_m1..3` (sprites/views); a hopper plays crouch → air → land with
+ * a real hop, the rest a 1-2-3-2 stride with a light bob. */
+type AniStyle = "trot" | "hop" | "scuttle";
+const ANI_GAIT: Record<string, { style: AniStyle; walkFps: number; sprintFps: number; tps: number; hop?: number }> = {
+  deer:   { style: "trot",    walkFps: 6, sprintFps: 13, tps: 2.1 },
+  fox:    { style: "trot",    walkFps: 6, sprintFps: 14, tps: 2.1 },
+  boar:   { style: "trot",    walkFps: 5, sprintFps: 11, tps: 1.5 },
+  lizard: { style: "scuttle", walkFps: 8, sprintFps: 16, tps: 2.5 },
+  crab:   { style: "scuttle", walkFps: 8, sprintFps: 15, tps: 1.75 },
+  hare:   { style: "hop",     walkFps: 4, sprintFps: 9,  tps: 2.75, hop: 5 },
+  toad:   { style: "hop",     walkFps: 3, sprintFps: 6,  tps: 1.25, hop: 3 },
+};
+const HOP = [1, 2, 2, 3];   // crouch, airborne (held), land
+
+/** Per frame for an animal sprite: texture, facing, bob/hop (as `gHoverY`). */
+export function tickAnimalGait(s: Phaser.GameObjects.Sprite, type: string, dt: number, native: View | undefined) {
+  const g = ANI_GAIT[type];
+  const spd: number = s.getData("spd") ?? 0;
+  if (!g) { s.setData("gHoverY", 0); return; }
+  let M: number = s.getData("gM") ?? 0, S: number = s.getData("gS") ?? 0;
+  M += (clamp01((spd - 0.12) / 0.25) - M) * Math.min(1, dt * 8);
+  S += (clamp01((spd - 0.8) / (g.tps * 0.5)) - S) * Math.min(1, dt * 5);
+  s.setData("gM", M).setData("gS", S);
+
+  const face: number = s.getData("gFace") ?? 1;
+  const view: View = s.getData("gView") ?? native ?? "side";
+  s.setFlipX(face < 0);
+
+  let phase: number = s.getData("gPhase") ?? Math.random() * 4;
+  phase += dt * (g.walkFps + (g.sprintFps - g.walkFps) * S) * M;
+  if (phase > 4000) phase -= 4000;
+  s.setData("gPhase", phase);
+
+  let tex = native ? viewKey(type, view, native) : type;
+  if (!s.scene.textures.exists(tex)) tex = type;
+  const moving = M > 0.06;
+  const step = Math.floor(phase) % 4;
+  const fkey = enemyFrame(tex, g.style === "hop" ? HOP[step] : PING[step]);
+  const key = moving && s.scene.textures.exists(fkey) ? fkey : tex;
+  if (s.texture.key !== key) s.setTexture(key);
+
+  // bob / hop on top of the frames
+  let lift = 0, sy = 1;
+  const a = (phase / 4) * TAU;
+  if (g.style === "hop") {
+    const q = phase % 4;                                  // 0..4 across one hop
+    if (q >= 1 && q < 3) lift = M * (g.hop ?? 3) * (0.6 + 0.4 * S) * Math.sin(((q - 1) / 2) * Math.PI);
+    else sy = 1 - M * 0.06;                               // gathered on the ground
+  } else {
+    lift = M * (0.4 + (g.style === "trot" ? 1 : 0.4) * S) * Math.abs(Math.sin(a));
+    sy = 1 - M * 0.03 * Math.abs(Math.cos(a));
+  }
+  s.setScale(1, sy);
+  s.setData("gHoverY", -lift);
 }

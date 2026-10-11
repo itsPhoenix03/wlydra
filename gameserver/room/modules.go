@@ -179,10 +179,7 @@ func (r *Room) handleBuildMod(p *Player, m map[string]any) {
 		r.modFail(p, seq, "cost")
 		return
 	}
-	dir := getInt32(m, "dir")
-	if dir != 1 {
-		dir = 0 // the art only has two facings; anything else is a client bug
-	}
+	dir := facingDir(m)
 	pay(p.Inv, def.Cost)
 	mod := &Module{I: i, Slot: slot, Kind: kind, HP: def.HP, Dir: dir, Owner: p.S.ID}
 	r.addModule(mod)

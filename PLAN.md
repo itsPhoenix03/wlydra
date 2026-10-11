@@ -1,4 +1,4 @@
-# Echoes of the Hearth — Development Plan
+# Wyldra — Development Plan
 
 Web-based 2D isometric co-op sandbox RPG with a living, reactive ecosystem simulation.
 

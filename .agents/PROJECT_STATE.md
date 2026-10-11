@@ -1,4 +1,4 @@
-# Project state — Echoes of the Hearth
+# Project state — Wyldra
 
 **Last updated:** 2026-09-20 · branch `dev` · session dump:
 `session-context-dump/2026-09-20_1700__modular-building.md`
