@@ -3,6 +3,7 @@
 // preload() does: for (const [k,u,w,h] of ASSET_MANIFEST) this.load.svg(k, u, {width:w, height:h});
 
 import { TILE_KEYS } from '../shared/world.js';
+import type { View } from './facing.ts';
 
 // Re-export sprite defs so main.ts has a single import source.
 export const NODE_SPR: Record<string, [string, number, number]> = {
@@ -216,14 +217,26 @@ export const HUMAN_CLIPS: [string, string, number][] = [
   ['keeper', 'walk', 8], ['keeper', 'chop', 8], ['keeper', 'mine', 8], ['keeper', 'spick', 8],
   ['keeper', 'pickup', 7], ['keeper', 'punch', 7],
   ['keeper', 'slash', 7], ['keeper', 'islash', 7], ['keeper', 'jump', 7], ['keeper', 'leap', 7], ['keeper', 'torch', 7], ['keeper', 'row', 8],
+  // walking away / sideways (tools/art/human-views.mjs)
+  ['keeper', 'back_walk', 8], ['keeper', 'side_walk', 8],
   ['villager', 'walk', 9], ['villager', 'collect', 9], ['villager', 'build', 9], ['villager', 'sit', 7],
+  ['villager', 'back_walk', 9], ['villager', 'side_walk', 9],
   ['villager2', 'walk', 9], ['villager2', 'collect', 9], ['villager2', 'craft', 9], ['villager2', 'sit', 7],
+  ['villager2', 'back_walk', 9], ['villager2', 'side_walk', 9],
   ['medic', 'walk', 9], ['medic', 'heal', 9], ['medic', 'prepare', 9],
   ['medic_snow', 'walk', 9], ['medic_snow', 'heal', 9], ['medic_snow', 'prepare', 9], ['medic_snow', 'shiver', 9],
 ];
 // swings that reach past the 32px body canvas: 64×48, body still centred
+// every keeper and NPC clip again from behind and in profile (tools/art/keeper-view-actions.mjs,
+// npc-view-actions.mjs); the walks have theirs above, and the medics never walk
+const _VIEW_CAST = new Set(['keeper', 'villager', 'villager2', 'medic', 'medic_snow']);
+for (const [c, a, n] of HUMAN_CLIPS.filter(([c, a]) => _VIEW_CAST.has(c) && !a.endsWith('walk')))
+  HUMAN_CLIPS.push([c, `back_${a}`, n], [c, `side_${a}`, n]);
 const _HUMAN_WIDE = new Set([
   'keeper_slash', 'keeper_islash', 'keeper_punch', 'keeper_chop', 'keeper_mine', 'keeper_spick', 'keeper_row',
+  ...['slash', 'islash', 'punch', 'chop', 'mine', 'spick', 'row', 'build'].flatMap((a) => [`keeper_back_${a}`, `keeper_side_${a}`]),
+  'villager_side_build', 'villager_back_build', 'villager2_side_craft', 'villager2_back_craft',
+  'medic_side_heal', 'medic_snow_side_heal',
 ]);
 const _HUMAN_SIZE: Record<string, [number, number]> = {
   keeper: [32, 48], villager: [32, 48], villager2: [32, 48], medic: [32, 48], medic_snow: [32, 48],   // adults share the keeper's scale
@@ -234,6 +247,11 @@ for (const [c, a, n] of HUMAN_CLIPS) {
   const [w, h] = _HUMAN_WIDE.has(`${c}_${a}`) ? [64, 48] : _HUMAN_SIZE[c];
   for (let i = 1; i <= n; i++) { const k = humanFrame(c, a, i); _manifest.push([k, `/sprites/${k}.svg`, w, h]); }
 }
+
+// --- back and side standing poses of every human that moves (same canvas as the front art) ---
+const _human = (k: string) => _manifest.find((e) => e[0] === k)!;
+for (const c of ['keeper', 'villager', 'villager2', 'woods_child', 'ashmark_hunter', 'elder_yvenne', 'medic', 'medic_snow'])
+  for (const v of ['back', 'side']) { const [, , w, h] = _human(c); _manifest.push([`${c}_${v}`, `/sprites/${c}_${v}.svg`, w, h]); }
 
 // --- pickup pop effects: `<res>_pop_01..05`, 32×40, shared ground contact at y=36 ---
 export const POP_RES = ['wood', 'stone', 'meat', 'fiber', 'crystal', 'starmetal', 'iron', 'essence', 'diamond'];
@@ -266,5 +284,26 @@ export const ENEMY_MOTION: Record<string, [string, number, number]> = {
 export const enemyFrame = (tex: string, i: number) => `${tex}_m${i}`;
 for (const [tex, [stem, w, h]] of Object.entries(ENEMY_MOTION))
   for (let i = 1; i <= 3; i++) _manifest.push([enemyFrame(tex, i), `/sprites/enemy_motion/${stem}_0${i}.svg`, w, h]);
+
+// --- directional views (src/facing.ts): each sprite's own art is its native view;
+// the other two live in sprites/views as `<key>_<view>` (+ `_m1..3` motion for enemies) ---
+export const CRE_VIEWS: Record<string, View> = {
+  creature: 'front', bog_shambler: 'front', brute: 'front', drowned: 'front', blight_lancer: 'front',
+  stalker: 'side', husk_wolf: 'side',
+};
+export const ANI_VIEWS: Record<string, View> = {
+  deer: 'side', boar: 'side', lizard: 'side', fox: 'side', hare: 'side', crab: 'front', toad: 'front',
+};
+const ALL_VIEWS: View[] = ['front', 'back', 'side'];
+for (const [table, motion] of [[CRE_VIEWS, true], [ANI_VIEWS, false]] as const)
+  for (const [key, native] of Object.entries(table)) {
+    const [, , w, h] = _manifest.find((e) => e[0] === key)!;
+    for (const v of ALL_VIEWS) {
+      if (v === native) continue;
+      const k = `${key}_${v}`;
+      _manifest.push([k, `/sprites/views/${k}.svg`, w, h]);
+      if (motion) for (let i = 1; i <= 3; i++) _manifest.push([enemyFrame(k, i), `/sprites/views/${enemyFrame(k, i)}.svg`, w, h]);
+    }
+  }
 
 export const ASSET_MANIFEST: [string, string, number, number][] = _manifest;

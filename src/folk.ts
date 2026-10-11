@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { pickView, viewKey, type View } from "./facing.ts";
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Island folk — the camps' villagers, hunter, child and elder.
@@ -8,7 +9,8 @@ import Phaser from "phaser";
  * act is idle / walk / run / talk / sit / collect / build / craft / hide. This
  * view only draws: the hut and fire of each camp, a lerped sprite per folk
  * member with the pack's clips where a kind has them (villager, villager2) and
- * a procedural bob where it does not, and speech bubbles — a greeting when a
+ * a procedural bob where it does not, front / back / side art from the way
+ * they walk or the keeper they face (src/facing.ts), and speech bubbles — a greeting when a
  * keeper walks up, a line on E, a shout when they bolt for the hut.
  * ──────────────────────────────────────────────────────────────────────────── */
 
@@ -85,6 +87,8 @@ const SHOUTS = ["Blight! Inside, quick!", "They're coming — get in!", "Run!", 
 
 /** Kinds with full clip sets in HUMAN_CLIPS; the rest are single frames. */
 const CLIPPED = new Set(["villager", "villager2"]);
+/** Stationary acts: played in whichever view the folk member arrived in, no turning mid-act. */
+const STILL_ACTS = new Set(["sit", "collect", "build", "craft"]);
 
 type FolkSpr = Phaser.GameObjects.Sprite;
 
@@ -157,7 +161,7 @@ export class FolkView {
       let sp = this.spr.get(id);
       if (!sp) {
         sp = s.add.sprite(p.x, p.y, kind).setOrigin(0.5, 0.92).setVisible(s.z === 0);
-        sp.setData({ kind, act: "", gvx: p.x, gvy: p.y, phase: Math.random() * 6, talkAt: -1e9, shoutAt: -1e9 });
+        sp.setData({ kind, act: "", view: "front", gvx: p.x, gvy: p.y, phase: Math.random() * 6, talkAt: -1e9, shoutAt: -1e9 });
         this.spr.set(id, sp);
       }
       sp.setData("tx", p.x).setData("ty", p.y);
@@ -187,24 +191,20 @@ export class FolkView {
       sp.setVisible(s.z === 0);
       s.tweens.add({ targets: sp, alpha: 1, duration: 300 });
     }
-    const clip = (a: string) => (CLIPPED.has(kind) && s.anims.exists(`${kind}_${a}`) ? `${kind}_${a}` : "");
     if (act === "walk" || act === "run") {
-      const k = clip("walk");
-      if (k) {
-        sp.play(k);
-        sp.anims.timeScale = act === "run" ? 1.7 : 1;
-      }
+      this.look(sp);
       if (act === "run" && this.clock - sp.getData("shoutAt") > 6) {
         sp.setData("shoutAt", this.clock);
         this.say(id, SHOUTS[(Math.random() * SHOUTS.length) | 0], 1800);
       }
     } else if (act === "sit") {
-      const k = clip("sit");
+      const k = this.clip(sp, "sit");
       if (k) sp.play(k);
+      else this.look(sp);
     } else if (act === "collect" || act === "build" || act === "craft") {
-      this.work(sp, clip(act));
+      this.work(sp, act);
     } else {
-      sp.setTexture(kind);
+      this.look(sp);
       if (act === "talk" && this.clock - sp.getData("talkAt") > 12 && this.near(sp, 3.2)) {
         sp.setData("talkAt", this.clock);
         this.say(id, this.nextLine(id, kind), 3600);
@@ -212,16 +212,44 @@ export class FolkView {
     }
   }
 
-  /** Loop a one-shot work clip with a short breather between passes. */
-  private work(sp: FolkSpr, key: string) {
-    if (!key) return;
-    const act = sp.getData("act");
+  /**
+   * Show the folk member's current view: the walk loop for that view (keeping
+   * the stride where it was), or the standing pose.
+   */
+  private look(sp: FolkSpr) {
+    const kind: string = sp.getData("kind"), act: string = sp.getData("act"), view: View = sp.getData("view");
+    if (act === "walk" || act === "run") {
+      const k = view === "front" ? `${kind}_walk` : `${kind}_${view}_walk`;
+      if (CLIPPED.has(kind) && this.s.anims.exists(k)) {
+        const at = sp.anims.isPlaying ? sp.anims.currentFrame?.index ?? 1 : 1;
+        sp.play({ key: k, startFrame: at - 1 });
+        sp.anims.timeScale = act === "run" ? 1.7 : 1;
+        return;
+      }
+    }
+    sp.anims.stop();
+    const key = viewKey(kind, view);
+    sp.setTexture(this.s.textures.exists(key) ? key : kind);
+  }
+
+  /** The `<kind>_<view>_<a>` anim for the folk member's view (front if that view lacks it), or "". */
+  private clip(sp: FolkSpr, a: string) {
+    const kind: string = sp.getData("kind"), view: View = sp.getData("view");
+    if (!CLIPPED.has(kind)) return "";
+    const k = view === "front" ? `${kind}_${a}` : `${kind}_${view}_${a}`;
+    return this.s.anims.exists(k) ? k : this.s.anims.exists(`${kind}_${a}`) ? `${kind}_${a}` : "";
+  }
+
+  /** Loop a one-shot work clip with a short breather between passes; kinds without one just stand in their view. */
+  private work(sp: FolkSpr, act: string) {
+    const key = this.clip(sp, act);
+    if (!key) return this.look(sp);
     sp.play(key);
     sp.once(Phaser.Animations.Events.ANIMATION_COMPLETE, () => {
       if (!sp.active || sp.getData("act") !== act) return;
-      sp.setTexture(sp.getData("kind"));
+      this.look(sp);
       this.s.time.delayedCall(350 + Math.random() * 500, () => {
-        if (sp.active && sp.getData("act") === act) this.work(sp, key);
+        if (sp.active && sp.getData("act") === act) this.work(sp, act);
       });
     });
   }
@@ -307,7 +335,7 @@ export class FolkView {
       const tx = sp.getData("tx"), ty = sp.getData("ty");
       let vx = sp.getData("gvx"), vy = sp.getData("gvy");
       const nx = vx + (tx - vx) * 0.15, ny = vy + (ty - vy) * 0.15;
-      const mx = nx - vx;
+      const mx = nx - vx, my = ny - vy;
       vx = nx;
       vy = ny;
       sp.setData("gvx", vx).setData("gvy", vy);
@@ -316,6 +344,16 @@ export class FolkView {
       if (act === "talk" && me) sp.setFlipX(me.x < vx);
       else if (mx < -0.15) sp.setFlipX(true);
       else if (mx > 0.15) sp.setFlipX(false);
+      if (!STILL_ACTS.has(act) && act !== "hide") {
+        const cur: View = sp.getData("view");
+        let view = cur;
+        if (act === "talk" && me) view = pickView(me.x - vx, me.y - vy, cur);
+        else if (Math.hypot(mx, my) > 0.15) view = pickView(mx, my, cur);
+        if (view !== cur) {
+          sp.setData("view", view);
+          this.look(sp);
+        }
+      }
       // procedural motion for single-frame kinds (and a run's urgency for all)
       const kind: string = sp.getData("kind");
       const ph = sp.getData("phase") + dt * (act === "run" ? 16 : 9);

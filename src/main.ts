@@ -29,7 +29,8 @@ import { GameAudio } from "./audio.ts";
 import { FolkView, type FolkHost } from "./folk.ts";
 import { sampleCreature, tickCreatureGait } from "./creatureGait.ts";
 import { getSetting } from "./settings.ts";
-import { ASSET_MANIFEST, HUMAN_CLIPS, NODE_SPR, POP_FRAME_MS, POP_RES, STRUCT_SPR, humanFrame } from "./assets.ts";
+import { ANI_VIEWS, ASSET_MANIFEST, HUMAN_CLIPS, NODE_SPR, POP_FRAME_MS, POP_RES, STRUCT_SPR, humanFrame } from "./assets.ts";
+import { pickView, viewKey, type View } from "./facing.ts";
 import { TileStore, UNLOADED, CHUNK, type ChunkMsg } from "./tiles.ts";
 import { LEGACY, LEGACY_WS_PORT, requestJoin, identityToken } from "./net.ts";
 
@@ -827,7 +828,7 @@ class Hearth extends Phaser.Scene {
         key: `${c}_${a}`,
         frames: Array.from({ length: n }, (_, i) => ({ key: humanFrame(c, a, i + 1) })),
         frameRate: 11,                                    // ~90ms/frame, the pack's preview timing
-        repeat: a === "walk" || a === "sit" ? -1 : 0,
+        repeat: a.endsWith("walk") || a.endsWith("sit") ? -1 : 0,   // walk / sit, any view
       });
     }
   }
@@ -895,13 +896,37 @@ class Hearth extends Phaser.Scene {
     }
   }
 
-  /** Play a one-shot medic clip, then settle back on the still base pose. */
+  /** Play a one-shot medic clip in the way they face, then settle back on the still base pose. */
   playMedic(medicId: string, action: "heal" | "prepare" | "shiver") {
     const s = this.medicSpr.get(medicId);
     const md = this.medics.find((m) => m.id === medicId);
     if (!s || !md || !this.anims.exists(`${md.sprite}_${action}`)) return;
-    s.play(`${md.sprite}_${action}`);
-    s.once(Phaser.Animations.Events.ANIMATION_COMPLETE, () => s.setTexture(md.sprite));
+    const view: View = s.getData("view") ?? "front";
+    const k = view === "front" ? `${md.sprite}_${action}` : `${md.sprite}_${view}_${action}`;
+    s.play(this.anims.exists(k) ? k : `${md.sprite}_${action}`);
+    s.once(Phaser.Animations.Events.ANIMATION_COMPLETE, () => this.medicPose(s, md.sprite));
+  }
+
+  /** A medic's still pose for the way they face. */
+  private medicPose(s: Phaser.GameObjects.Sprite, sprite: string) {
+    const key = viewKey(sprite, s.getData("view") ?? "front");
+    s.setTexture(this.textures.exists(key) ? key : sprite);
+  }
+
+  /** Medics turn to face a keeper standing near them, and back to the camera once they leave. */
+  private tickMedics() {
+    for (const md of this.medics) {
+      const s = this.medicSpr.get(md.id);
+      if (!s) continue;
+      const near = this.z === 0 && Math.hypot(md.x + 0.5 - this.px, md.y + 0.5 - this.py) < 4;
+      const dx = this.me.x - s.x, dy = this.me.y - s.y;
+      const cur: View = s.getData("view") ?? "front";
+      const view = near ? pickView(dx, dy, cur) : "front";
+      s.setFlipX(view === "side" && dx < 0);   // side art faces right; front and back keep their own handedness
+      if (view === cur) continue;
+      s.setData("view", view);
+      if (!s.anims.isPlaying) this.medicPose(s, md.sprite);
+    }
   }
 
   /** Ambient keeper loop for our own rig — mirrors the server's exposure rules (tick.go). */
@@ -1552,12 +1577,12 @@ class Hearth extends Phaser.Scene {
         const o = this.others.get(m.id);
         if (o && (m.a === "slash" || m.a === "thrust" || m.a === "punch")) {
           // their swing should land on the creature they are fighting: nearest one on screen
-          let best = 150, tdx = 0;
+          let best = 150, tdx = 0, tdy = 0;
           for (const c of this.creSpr.values()) {
             const d = Math.hypot(c.x - o.rig.x, c.y - o.rig.y);
-            if (d < best) { best = d; tdx = c.x - o.rig.x; }
+            if (d < best) { best = d; tdx = c.x - o.rig.x; tdy = c.y - o.rig.y; }
           }
-          if (tdx) o.rig.face(tdx);
+          if (tdx || tdy) o.rig.faceDir(tdx, tdy);
         }
         o?.rig.playAction({ name: m.a, tool: m.tool, dirX: m.dx, dirY: m.dy });
       }
@@ -2027,8 +2052,20 @@ class Hearth extends Phaser.Scene {
             .setVisible(this.z === 0);
           this.aniSpr.set(aid, s);
         }
-        if (p.x < s.x - 0.5) s.setFlipX(true);
-        else if (p.x > s.x + 0.5) s.setFlipX(false);
+        // turn along the step between server positions: flip for left/right,
+        // and the front / back / side art (src/facing.ts)
+        const ptx: number | undefined = s.getData("tx"), pty: number | undefined = s.getData("ty");
+        if (ptx !== undefined && pty !== undefined && Math.hypot(p.x - ptx, p.y - pty) > 0.5) {
+          if (p.x < ptx - 0.5) s.setFlipX(true);
+          else if (p.x > ptx + 0.5) s.setFlipX(false);
+          const native = ANI_VIEWS[type];
+          if (native) {
+            const v = pickView(p.x - ptx, p.y - pty, s.getData("view") ?? native);
+            const key = viewKey(type, v, native);
+            s.setData("view", v);
+            if (s.texture.key !== key && this.textures.exists(key)) s.setTexture(key);
+          }
+        }
         s.setData("tx", p.x).setData("ty", p.y).setData("cx", x).setData("cy", y);
       }
       this.folk.sync(m.f);
@@ -2712,7 +2749,7 @@ class Hearth extends Phaser.Scene {
             : null;
       // turn to the node so the swing / reach lands on it
       const ns = this.nodeSpr.get(best);
-      if (ns) this.me.face(ns.x - this.me.x);
+      if (ns) this.me.faceDir(ns.x - this.me.x, ns.y - this.me.y);
       // anticipation only — audio.chop() now fires on server-confirmed 'node' (see onMsg).
       // Same clip the server derives: tools swing, a bare-handed tree is punched,
       // everything else (bushes, loose stone) is picked up by hand.
@@ -2750,15 +2787,15 @@ class Hearth extends Phaser.Scene {
         }
   }
 
-  /** Screen-space x offset to what the server will hit: nearest creature, else animal, within 2.4 tiles (actions.go). */
-  attackTargetDx(): number | null {
+  /** Screen-space offset to what the server will hit: nearest creature, else animal, within 2.4 tiles (actions.go). */
+  attackTarget(): [number, number] | null {
     for (const pool of [this.creSpr, this.aniSpr]) {
       let best: Phaser.GameObjects.Sprite | null = null, bd = 2.4;
       for (const s of pool.values()) {
         const d = Math.hypot(s.getData("cx") - this.px, s.getData("cy") - this.py);
         if (d < bd) { bd = d; best = s; }
       }
-      if (best) return best.x - this.me.x;
+      if (best) return [best.x - this.me.x, best.y - this.me.y];
     }
     return null;
   }
@@ -2766,9 +2803,9 @@ class Hearth extends Phaser.Scene {
   attack() {
     if (!this.ready) return;
     this.audio.swing();   // wind-up sound stays at action start (Guide §impact audio)
-    // turn to the target so the level cut lands on it, whichever side it is on
-    const tdx = this.attackTargetDx();
-    if (tdx) this.me.face(tdx);
+    // turn to the target so the cut lands on it, whichever way it is
+    const tgt = this.attackTarget();
+    if (tgt) this.me.faceDir(tgt[0], tgt[1]);
     this.me.act(this.equipped);
     this.send({
       t: "atk",
@@ -2972,6 +3009,8 @@ class Hearth extends Phaser.Scene {
       const wx = dx / len + dy / len,
         wy = dy / len - dx / len;
       this.me.face(dx || wx);
+      // WASD are screen directions: any sideways key shows the profile
+      this.me.setView(dx ? "side" : dy < 0 ? "back" : "front");
       this.faceX = Math.abs(wx) > Math.abs(wy) ? Math.sign(wx) : 0;
       this.faceY = this.faceX ? 0 : Math.sign(wy);
       const slowed = this.slowUntil > 0;
@@ -3108,7 +3147,7 @@ class Hearth extends Phaser.Scene {
         }
       }
       if (d > 0.5) {
-        o.rig.face(o.tx - o.rig.x);
+        o.rig.faceDir(o.tx - o.rig.x, o.ty - o.rig.y);
         o.rig.x += (o.tx - o.rig.x) * 0.18;
         o.rig.y += (o.ty - o.rig.y) * 0.18;
         o.rig.setDepth(o.rig.y);
@@ -3132,7 +3171,7 @@ class Hearth extends Phaser.Scene {
       vy += (ty - vy) * 0.15;
       s.setData("gvx", vx).setData("gvy", vy);
       const near = Math.hypot(vx - this.me.x, vy - this.me.y) < 130;
-      tickCreatureGait(this, s, s.getData("ctype"), dt, near, this.me.x,
+      tickCreatureGait(this, s, s.getData("ctype"), dt, near, this.me.x, this.me.y,
         this.tileAt(s.getData("cx") ?? 0, s.getData("cy") ?? 0) === T.WATER);
       const lift = this.creatureJumpTick(s, s.getData("ctype"), dt, near, vx, vy);
       s.x = vx;
@@ -3140,6 +3179,7 @@ class Hearth extends Phaser.Scene {
       s.setDepth(vy);
     }
     this.folk.tick(dt);
+    this.tickMedics();
     // animals: plain lerp (gait not in scope here — only the listed creature types)
     for (const s of this.aniSpr.values()) {
       const tx = s.getData("tx"),

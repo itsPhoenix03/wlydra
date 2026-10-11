@@ -1,5 +1,6 @@
 import Phaser from "phaser";
-import { enemyFrame } from "./assets.ts";
+import { CRE_VIEWS, enemyFrame } from "./assets.ts";
+import { pickView, viewKey, type View } from "./facing.ts";
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Creature gait — walking and sprinting for every enemy type.
@@ -24,7 +25,9 @@ import { enemyFrame } from "./assets.ts";
  * the server's `cre` updates (spd, tiles/s) against the type's full hunting
  * speed. Idle amble (creature_ai.go: 40%) reads as a walk; a hunt at full speed,
  * a stalker's dart, an enraged charge read as a sprint, with a smooth blend.
- * Facing follows the travel, or turns to the keeper when close and still.
+ * Facing follows the travel, or turns to the keeper when close and still: a
+ * left/right flip plus the front / back / side art (src/facing.ts, CRE_VIEWS),
+ * each with its own motion set. Wisps and wraiths have no views — they are orbs.
  * Purely cosmetic and client-local, like the leap layer that runs after it.
  * ──────────────────────────────────────────────────────────────────────────── */
 
@@ -75,9 +78,10 @@ export function sampleCreature(s: Phaser.GameObjects.Sprite, x: number, y: numbe
       const inst = Math.hypot(dx, dy) / dts;
       // a jump of many tiles is a respawn / knockback, not running
       if (inst < 15) s.setData("spd", (s.getData("spd") ?? 0) * 0.4 + inst * 0.6);
-      // screen-space horizontal travel is (dx - dy) in the iso projection
-      const sdx = dx - dy;
+      // screen-space travel in the iso projection: x is (dx - dy), y is (dx + dy) / 2
+      const sdx = dx - dy, sdy = (dx + dy) / 2;
       if (Math.abs(sdx) > 0.03) s.setData("gFace", sdx < 0 ? -1 : 1);
+      if (Math.abs(sdx) + Math.abs(sdy) > 0.04) s.setData("gView", pickView(sdx, sdy, s.getData("gView") ?? "front"));
     }
   }
   s.setData("sT", now);
@@ -94,6 +98,7 @@ export function tickCreatureGait(
   dt: number,
   near: boolean,
   meX: number,
+  meY: number,
   inWater: boolean,
 ) {
   const g = CRE_GAIT[type] ?? CRE_GAIT.crawler;
@@ -110,10 +115,16 @@ export function tickCreatureGait(
 
   // facing: travel direction; when close and holding still, the keeper
   let face: number = s.getData("gFace") ?? 1;
-  if (near && M < 0.3 && Math.abs(meX - s.x) > 6) face = meX < s.x ? -1 : 1;
-  s.setData("gFace", face);
+  let view: View = s.getData("gView") ?? "front";
+  if (near && M < 0.3 && Math.hypot(meX - s.x, meY - s.y) > 6) {
+    if (Math.abs(meX - s.x) > 6) face = meX < s.x ? -1 : 1;
+    view = pickView(meX - s.x, meY - s.y, view);
+  }
+  s.setData("gFace", face).setData("gView", view);
   s.setFlipX(face < 0);
-  const dir = face;
+  // body lean and pitch read along the travel only in profile
+  const native = CRE_VIEWS[g.tex];
+  const dir = face * (!native || view === "side" ? 1 : 0.35);
 
   // stride clock: frames advance with speed; one cycle = 4 frames = 2 footfalls
   let phase: number = s.getData("gPhase") ?? 0;
@@ -125,9 +136,11 @@ export function tickCreatureGait(
   s.setData("gPhase", phase);
   const a = (phase / 4) * TAU;
 
-  // texture: the base art at rest, the motion set when moving
+  // texture: the base art at rest, the motion set when moving — for the view
+  let tex = native ? viewKey(g.tex, view, native) : g.tex;
+  if (!s.scene.textures.exists(tex)) tex = g.tex;
   const moving = g.style === "hover" || M > 0.06;
-  const key = moving ? enemyFrame(g.tex, PING[Math.floor(phase) % 4]) : g.tex;
+  const key = moving ? enemyFrame(tex, PING[Math.floor(phase) % 4]) : tex;
   if (s.texture.key !== key && s.scene.textures.exists(key)) s.setTexture(key);
 
   let sx = 1, sy = 1, rot = 0, lift = 0, hover = 0;
