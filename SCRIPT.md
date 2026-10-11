@@ -1,4 +1,4 @@
-# Echoes of the Hearth — Game Script
+# Wyldra — Game Script
 
 Narrative script for the full game. Text in `"quotes"` is player-facing copy, ready to wire
 into `showMsg`, cutscene cards, or NPC dialogue (see `shared/dialogue.js` for the line banks).

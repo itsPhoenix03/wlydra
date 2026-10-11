@@ -1,4 +1,4 @@
-# Echoes of the Hearth Implementation Guide Set
+# Wyldra Implementation Guide Set
 
 This directory holds implementation documentation plus staged source art awaiting integration.
 Runtime assets live in the game repository under `assets/` (configured as Vite's `publicDir`), with

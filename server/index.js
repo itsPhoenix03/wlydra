@@ -1,4 +1,4 @@
-﻿// Echoes of the Hearth — authoritative co-op survival server.
+﻿// Wyldra — authoritative co-op survival server.
 import { WebSocketServer } from 'ws';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { genWorld, findSpawn, findMedicSpawns, medicBlockTiles, nearestLand, SIZE, T, MONOLITHS, CORE, DIGGABLE, WORLD_VERSION, ACTIVATION_I, ISLES, LANDMARK_BLOCK } from '../shared/world.js';

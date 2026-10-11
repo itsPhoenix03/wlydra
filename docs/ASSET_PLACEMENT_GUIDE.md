@@ -1,6 +1,6 @@
-# Echoes of the Hearth Asset Placement Guide
+# Wyldra Asset Placement Guide
 
-This guide explains how to use the extra asset pack without breaking the game world's biome logic, visual language, or progression. The assets are optional additions for `echoes-of-the-hearth`; they are not wired into gameplay until you add data definitions, preload entries, recipes, world placement rules, and server validation.
+This guide explains how to use the extra asset pack without breaking the game world's biome logic, visual language, or progression. The assets are optional additions for `wyldra`; they are not wired into gameplay until you add data definitions, preload entries, recipes, world placement rules, and server validation.
 
 ## Source And Runtime Locations
 

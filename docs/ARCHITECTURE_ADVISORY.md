@@ -1,6 +1,6 @@
 # Architecture & Asset Advisory
 
-Advisory notes for implementers working from these guides against `../echoes-of-the-hearth`.
+Advisory notes for implementers working from these guides against `../wyldra`.
 Rule of thumb for every item below: prefer changes that are data-driven, additive, and
 server-validated. If a change touches `shared/world.js`, stop and read item 2 first.
 
