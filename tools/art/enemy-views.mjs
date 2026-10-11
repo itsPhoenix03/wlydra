@@ -380,6 +380,51 @@ function wolfBack({ p, b }) {
 emit('husk_wolf', 'front', 58, 42, wolfFront, 0.5);
 emit('husk_wolf', 'back', 58, 42, wolfBack, 0.5);
 
+// ── wisp / frost_wraith (32×40, hooded spirit round a glowing core) ─────────
+// Front-native: the core faces the viewer. From behind the shroud hides it (a
+// dim glow shows through); in profile the core sits at the leading edge and the
+// tendrils stream back. The pulse ring that drifts across the core in the
+// front motion set drifts the same way here.
+const ORB = {
+  wisp: { shroud: '#55406b', glow: ['#f2dcff', '#bb84e6', '#563467'], seam: '#d3a9ee', core: '#e8ccfa', heart: '#fff1ff', ring: '#d5b0ec' },
+  frost_wraith: { shroud: '#3b687b', glow: ['#e9fcf8', '#8bd0dc', '#397d91'], seam: '#b6edf1', core: '#cbf1f0', heart: '#ffffff', ring: '#d5b0ec', horns: '#b7e5e8' },
+};
+const ORB_TENDRIL = 'stroke="#9b6fc3" stroke-width="1.5" stroke-linecap="round" opacity=".8"';
+const orbDefs = (o) =>
+  `<defs><radialGradient id="glow"><stop stop-color="${o.glow[0]}"/><stop offset=".45" stop-color="${o.glow[1]}"/><stop offset="1" stop-color="${o.glow[2]}" stop-opacity=".2"/></radialGradient></defs>`;
+const orbMotes = '<circle cx="6" cy="9" r="1" fill="#d9bafa"/><circle cx="26" cy="20" r=".8" fill="#d9bafa"/>';
+function orbBack(o) {
+  return ({ p, b }) => G(b ? `translate(0 ${b})` : '',
+    orbDefs(o) +
+    P('M16 3q11 3 11 14-1 6-5 10l2 8-7-6-6 8-1-11Q4 20 6 13 8 5 16 3Z', `fill="${o.shroud}" opacity=".8"`) +
+    // the core seen through the back of the shroud
+    P('M16 6q8 3 8 11-1 7-7 10-8-3-9-10Q9 8 16 6Z', 'fill="url(#glow)" opacity=".35"') +
+    `<circle cx="16" cy="16" r="3" fill="${o.core}" opacity=".22"/>` +
+    (p ? `<circle cx="${16 + p}" cy="16" r="5.5" fill="none" stroke="${o.ring}" stroke-width=".7" opacity=".3"/>` : '') +
+    P('M16 5.4V27m-5-15q5 2 10 0', `fill="none" stroke="${o.seam}" stroke-width=".7" opacity=".45"`) +
+    P(`m11 25-4 ${5 + p * .6}m11-2 0 8m5-11 4 ${6 - p * .6}`, ORB_TENDRIL) +
+    (o.horns ? P('m9 11-4-7 8 4m10 0 7-4-4 8', `fill="${o.horns}" opacity=".7"`) : '') +
+    orbMotes);
+}
+function orbSide(o) {
+  return ({ p, b }) => G(b ? `translate(0 ${b})` : '',
+    orbDefs(o) +
+    (o.horns ? P('M12 9 7.4 3.4 15 7.2Z', `fill="${o.horns}" opacity=".45"`) : '') +
+    // tendrils streaming back from the hem
+    P(`m12 25-6 ${4 + p * .6}m9-1-3 ${7 - p * .4}m6-6 0 8`, ORB_TENDRIL) +
+    P('M17 3Q25.4 5 25.4 15.4Q24.6 21.6 20.4 25.4L21.4 33.4 15.6 28.4 9.4 33.4 10.2 24.4Q6.8 18.2 8.8 11.2Q11 4 17 3Z', `fill="${o.shroud}" opacity=".7"`) +
+    P('M18 6.4Q24 8.6 24 16.4Q23.2 22.6 18.6 26.2Q12.4 23.4 12 16.6Q12.2 8.6 18 6.4Z', 'fill="url(#glow)"') +
+    P('m13.6 14 2.4-5m-2.6 13.4 3.6 5.4', `stroke="${o.seam}" stroke-width=".8" opacity=".75"`) +
+    `<circle cx="19.6" cy="16" r="3.8" fill="${o.core}"/><circle cx="20.2" cy="16" r="1.8" fill="${o.heart}"/>` +
+    (p ? `<circle cx="${19.2 + p}" cy="16" r="5" fill="none" stroke="${o.ring}" stroke-width=".7" opacity=".65"/>` : '') +
+    (o.horns ? P('M14 8.6 8.6 2.4 17.6 6.6Z', `fill="${o.horns}" opacity=".7"`) : '') +
+    orbMotes);
+}
+for (const [key, o] of Object.entries(ORB)) {
+  emit(key, 'back', 32, 40, orbBack(o), 0.4);
+  emit(key, 'side', 32, 40, orbSide(o), 0.4);
+}
+
 // ── write ───────────────────────────────────────────────────────────────────
 mkdirSync(OUT, { recursive: true });
 for (const [name, s] of out) writeFileSync(`${OUT}/${name}.svg`, s);

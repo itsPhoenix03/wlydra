@@ -272,10 +272,7 @@ func (r *Room) handleBuild(p *Player, m map[string]any) {
 		return
 	}
 	p.Inv[kind]--
-	dir := 0
-	if jsTruthy(m, "dir") {
-		dir = 1
-	}
+	dir := facingDir(m)
 	r.structures[i] = &Structure{Kind: kind, HP: baseHP, Owner: p.S.ID, Dir: dir, Lvl: 1}
 	r.broadcast(map[string]any{"t": "build", "i": i, "kind": kind, "hp": baseHP, "dir": dir, "lvl": 1})
 	if kind == "chest" {

@@ -27,10 +27,11 @@ import { shirtFor } from "./keeperSkins.ts";
 import { initUI, showMsg, reset as resetUI, UIState } from "./ui.ts";
 import { GameAudio } from "./audio.ts";
 import { FolkView, type FolkHost } from "./folk.ts";
-import { sampleCreature, tickCreatureGait } from "./creatureGait.ts";
+import { creatureLookAt, sampleCreature, tickAnimalGait, tickCreatureGait, type LookTarget } from "./creatureGait.ts";
 import { getSetting } from "./settings.ts";
 import { ANI_VIEWS, ASSET_MANIFEST, HUMAN_CLIPS, NODE_SPR, POP_FRAME_MS, POP_RES, STRUCT_SPR, humanFrame } from "./assets.ts";
 import { pickView, viewKey, type View } from "./facing.ts";
+import { ROTATABLE_MODS, facing, facingCount } from "./rotation.ts";
 import { TileStore, UNLOADED, CHUNK, type ChunkMsg } from "./tiles.ts";
 import { LEGACY, LEGACY_WS_PORT, requestJoin, identityToken } from "./net.ts";
 
@@ -81,6 +82,13 @@ const CRE_POUNCE: Record<string, { dur: number; h: number }> = {
   drowned: { dur: 0.45, h: 12 },
   stalker: { dur: 0.5, h: 16 },
   husk_wolf: { dur: 0.55, h: 20 },
+};
+// Where a bolt / beam leaves its shooter, by the way the shooter faces (px from the sprite's
+// (.5, .9) anchor, at base scale; side faces right): the lancer's chest core
+// (blight_lancer*.svg) and the brute's mouth (brute*.svg). From behind the muzzle is hidden.
+const MUZZLE: Record<string, Record<View, [number, number]>> = {
+  blight_lancer: { front: [0, -33.8], side: [11, -33.8], back: [0, -33.8] },
+  brute: { front: [0, -15], side: [14, -14.6], back: [0, -18] },
 };
 const CRE_STOMP: Record<string, { dur: number; h: number }> = {
   brute: { dur: 0.5, h: 9 },
@@ -428,13 +436,10 @@ class Hearth extends Phaser.Scene {
       this.setPlacingMod(null);
     });
     this.input.keyboard!.on("keydown-R", () => {
-      if (
-        this.placing &&
-        ((RECIPES as any)[this.placing]?.rot || this.placing === "wall")
-      ) {
-        this.placeDir ^= 1;
-        this.ghost?.setFlipX(this.placeDir === 1);
-      }
+      const tex = this.rotatingTex();
+      if (!tex) return;
+      this.placeDir = (this.placeDir + 1) % facingCount(tex);
+      this.faceGhost();
     });
     this.input.keyboard!.on("keydown-T", () => {
       if (this.z === 1 && this.inv.torch > 0) {
@@ -1331,9 +1336,8 @@ class Hearth extends Phaser.Scene {
     if (kind) {
       const tex = DECOR_TEX[kind] || kind;
       this.ghost = this.add.sprite(0, 0, tex).setAlpha(0.55).setDepth(999999);
-      const r = (RECIPES as any)[kind];
-      const rotable = r?.rot || kind === "wall";
-      if (rotable) this.ghost.setFlipX(this.placeDir === 1);
+      const rotable = !!this.rotatingTex();
+      this.faceGhost();
       showMsg(
         `Placing ${NAMES[kind] || kind} — click a tile (ESC cancels${rotable ? ", R rotates" : ""}${kind === "wall" ? ", click existing to stack" : ""})`,
       );
@@ -1353,13 +1357,31 @@ class Hearth extends Phaser.Scene {
     const def = (MODULES as any)[kind];
     if (!def) return;
     this.ghost = this.add.sprite(0, 0, kind).setAlpha(0.55).setDepth(999999);
+    this.faceGhost();
     const cost = Object.entries(def.cost)
       .map(([k, v]) => `${v} ${NAMES[k] || k}`)
       .join(", ");
     showMsg(
       `Building ${NAMES[kind] || kind} (${cost}) — click a tile` +
-        " (ESC cancels)",
+        ` (ESC cancels${ROTATABLE_MODS.has(kind) ? ", R rotates" : ""})`,
     );
+  }
+
+  /** Texture of the piece being placed if R can turn it, else null. */
+  rotatingTex(): string | null {
+    if (this.placingMod) return ROTATABLE_MODS.has(this.placingMod) ? this.placingMod : null;
+    if (!this.placing) return null;
+    const rotable = (RECIPES as any)[this.placing]?.rot || this.placing === "wall";
+    return rotable ? DECOR_TEX[this.placing] || this.placing : null;
+  }
+
+  /** Show the placement ghost at the current facing (pieces that can't turn stay as drawn). */
+  faceGhost() {
+    const tex = this.rotatingTex();
+    if (!tex || !this.ghost) return;
+    this.placeDir %= facingCount(tex);
+    const [t, flip] = facing(tex, this.placeDir);
+    this.ghost.setTexture(this.textures.exists(t) ? t : tex).setFlipX(flip);
   }
 
   /** The slot the currently selected module would occupy. */
@@ -1381,7 +1403,7 @@ class Hearth extends Phaser.Scene {
         i: y * SIZE + x,
         kind: this.placingMod,
         slot: this.modSlotFor(this.placingMod),
-        dir: 0,
+        dir: ROTATABLE_MODS.has(this.placingMod) ? this.placeDir : 0,
         seq: ++this.modSeq,
       });
       return;
@@ -1881,6 +1903,7 @@ class Hearth extends Phaser.Scene {
       // brute telegraph: tint brute 0xffaa00 + play telegraph sound (Guide §3.3)
       const bs = this.creSpr.get(m.id);
       if (bs) {
+        creatureLookAt(bs, this.nearestPlayer(bs), 0.9);   // squares up to its prey for the windup
         bs.setTint(0xffaa00);
         this.audio.telegraph();
         this.startCreatureJump(bs, CRE_STOMP[bs.getData("ctype")]);
@@ -1891,6 +1914,7 @@ class Hearth extends Phaser.Scene {
     } else if (m.t === "calert") {
       // a creature has spotted its prey: a "!" pops over it
       const cs = this.creSpr.get(m.id);
+      if (cs) creatureLookAt(cs, this.nearestPlayer(cs), 0.8);   // turns on the player it locked on to
       if (cs && cs.visible) {
         const t = this.add
           .text(cs.x, cs.y - cs.displayHeight - 2, "!", {
@@ -1906,10 +1930,29 @@ class Hearth extends Phaser.Scene {
       this.thirst = m.thirst;
     } else if (m.t === "shot") {
       // brute blight-bolt: vibrant flashing beam + glowing bolt
-      const a = this.iso(m.fx, m.fy), b = this.iso(m.tx, m.ty);
       const lance = m.kind === "lance";   // siege beam: heavier, hotter, longer-lasting
-      const ax = a.x, ay = a.y - (lance ? 40 : 24), bx = b.x, by = b.y - 8;
-      const beam = this.add.graphics().setDepth(999969).setBlendMode(Phaser.BlendModes.ADD);
+      const b = this.isoE(m.tx, m.ty);
+      const bx = b.x, by = b.y - 14;       // lands on the target's body
+      // the message has no shooter id: the brute / lancer standing where the shot starts
+      const shooter = [...this.creSpr.values()].find((c) =>
+        c.getData("ctype") === (lance ? "blight_lancer" : "brute") &&
+        Math.hypot(c.getData("cx") - m.fx, c.getData("cy") - m.fy) < 1.5);
+      let ax: number, ay: number, depth = 999969;
+      if (shooter) {
+        creatureLookAt(shooter, b, lance ? 0.9 : 0.7);
+        // the shot leaves the muzzle for the way it is turning to fire (it turns this frame)
+        const view = pickView(bx - shooter.x, by - shooter.y, shooter.getData("gView") ?? "front");
+        const [mx, my] = MUZZLE[shooter.getData("ctype")][view];
+        const base: number = shooter.getData("gBase") ?? 1;
+        ax = shooter.x + mx * base * (bx < shooter.x ? -1 : 1);
+        ay = shooter.y + my * base;
+        // fired away from the camera, it leaves the far side: the body hides where it starts
+        if (view === "back") depth = shooter.depth - 0.5;
+      } else {
+        const a = this.isoE(m.fx, m.fy);
+        ax = a.x; ay = a.y - (lance ? 40 : 24);
+      }
+      const beam = this.add.graphics().setDepth(depth).setBlendMode(Phaser.BlendModes.ADD);
       let flash = 0;
       const strobe = this.time.addEvent({
         delay: lance ? 40 : 45, repeat: lance ? 9 : 5,
@@ -1928,7 +1971,7 @@ class Hearth extends Phaser.Scene {
       if (lance) this.cameras.main.shake(120, 0.005);
       // bolt travelling the beam, pulsing and glowing
       const pr = this.add.image(ax, ay, "blight_spore")
-        .setScale(0.55).setTint(0xff6ef5).setDepth(999970).setBlendMode(Phaser.BlendModes.ADD);
+        .setScale(0.55).setTint(0xff6ef5).setDepth(depth + 0.1).setBlendMode(Phaser.BlendModes.ADD);
       this.tweens.add({ targets: pr, scale: 0.85, duration: 110, yoyo: true, repeat: 1 });
       this.tweens.add({
         targets: pr, x: bx, y: by, duration: 220,
@@ -1945,6 +1988,8 @@ class Hearth extends Phaser.Scene {
       this.audio.hitmob();
       this.audio.whoosh();
       const s = this.creSpr.get(m.id) || this.aniSpr.get(m.id);
+      const hitter = m.by === this.id ? this.me : this.others.get(m.by)?.rig;
+      if (s && hitter && this.creSpr.has(m.id)) creatureLookAt(s, hitter, 0.6);   // turns on whoever hit it
       if (s) {
         s.setTintFill(0xffffff).setData("flashing", true); // the gait's tint glow waits
         // restore any base tint — clearTint alone would revert to the bare art
@@ -2052,20 +2097,9 @@ class Hearth extends Phaser.Scene {
             .setVisible(this.z === 0);
           this.aniSpr.set(aid, s);
         }
-        // turn along the step between server positions: flip for left/right,
-        // and the front / back / side art (src/facing.ts)
-        const ptx: number | undefined = s.getData("tx"), pty: number | undefined = s.getData("ty");
-        if (ptx !== undefined && pty !== undefined && Math.hypot(p.x - ptx, p.y - pty) > 0.5) {
-          if (p.x < ptx - 0.5) s.setFlipX(true);
-          else if (p.x > ptx + 0.5) s.setFlipX(false);
-          const native = ANI_VIEWS[type];
-          if (native) {
-            const v = pickView(p.x - ptx, p.y - pty, s.getData("view") ?? native);
-            const key = viewKey(type, v, native);
-            s.setData("view", v);
-            if (s.texture.key !== key && this.textures.exists(key)) s.setTexture(key);
-          }
-        }
+        // ground speed, flip and front / back / side view, like the creatures (src/creatureGait.ts)
+        if (!s.getData("atype")) s.setData("atype", type || "deer").setData("gView", ANI_VIEWS[type || "deer"]);
+        sampleCreature(s, x, y, this.time.now);
         s.setData("tx", p.x).setData("ty", p.y).setData("cx", x).setData("cy", y);
       }
       this.folk.sync(m.f);
@@ -2250,8 +2284,10 @@ class Hearth extends Phaser.Scene {
     if (this.modSpr.has(key)) return;
     if (!(MODULES as any)[kind]) return; // a kind this client does not know
     const g = this.modPlacement(slot, i % SIZE, (i / SIZE) | 0);
+    const [tex, flip] = ROTATABLE_MODS.has(kind) ? facing(kind, dir) : [kind, false];
     const spr = this.add
-      .sprite(g.x, g.y, kind)
+      .sprite(g.x, g.y, this.textures.exists(tex) ? tex : kind)
+      .setFlipX(flip)
       .setOrigin(g.ox, g.oy)
       .setDepth(g.depth)
       .setAlpha(this.z !== 0 ? 0.15 : 1);
@@ -2346,7 +2382,7 @@ class Hearth extends Phaser.Scene {
       existing.hp = hp;
       const off = (STORY_OFF[kind] || 26) * (lvl - 1);
       const s = this.add
-        .sprite(existing.spr.x, existing.spr.y - off, kind)
+        .sprite(existing.spr.x, existing.spr.y - off, existing.spr.texture.key)
         .setOrigin(existing.spr.originX, existing.spr.originY)
         .setDepth(existing.spr.depth + lvl - 1)
         .setFlipX(existing.spr.flipX)
@@ -2389,7 +2425,11 @@ class Hearth extends Phaser.Scene {
         .setOrigin(0.5, 0.92)
         .setDepth(p.y + 20);
     }
-    if ((kind === "wall" || r?.rot) && dir) spr.setFlipX(true);
+    if (kind === "wall" || r?.rot) {
+      const [t, flip] = facing(tex, dir);
+      if (this.textures.exists(t)) spr.setTexture(t);
+      spr.setFlipX(flip);
+    }
     if (this.z === 1) spr.setAlpha(0.15);
     // structure pop-in: scale 0.6->1 with a small y drop instead of snapping into place
     const structFinalY = spr.y;
@@ -2819,6 +2859,17 @@ class Hearth extends Phaser.Scene {
   // position-lerp loop in update(). Reads/writes only sprite-local data (setData), so no
   // extra timers or tweens are needed and state is naturally cleared when the sprite is
   // destroyed via the existing death/removal path.
+  /** The player rig on this layer nearest to a sprite — who a creature is going for. */
+  nearestPlayer(s: { x: number; y: number }): LookTarget {
+    let best: LookTarget = this.me, bd = Math.hypot(this.me.x - s.x, this.me.y - s.y);
+    for (const o of this.others.values()) {
+      if (o.z !== this.z) continue;
+      const d = Math.hypot(o.rig.x - s.x, o.rig.y - s.y);
+      if (d < bd) { bd = d; best = o.rig; }
+    }
+    return best;
+  }
+
   /** Begin a leap on a creature sprite (no-op mid-leap or for types that never jump). */
   startCreatureJump(s: Phaser.GameObjects.Sprite, spec?: { dur: number; h: number }) {
     if (!spec || (s.getData("jT") ?? -1) >= 0) return;
@@ -2845,6 +2896,7 @@ class Hearth extends Phaser.Scene {
       s.setData("jCd", cd);
       if (!near || cd > 0 || !s.visible) return 0;
       this.startCreatureJump(s, pounce);
+      creatureLookAt(s, this.me, pounce.dur);   // the pounce is at the keeper
       t = 0;
     }
     const dur: number = s.getData("jDur"), h: number = s.getData("jH");
@@ -3180,15 +3232,19 @@ class Hearth extends Phaser.Scene {
     }
     this.folk.tick(dt);
     this.tickMedics();
-    // animals: plain lerp (gait not in scope here — only the listed creature types)
+    // animals: lerp a base position, the walk / hop drawn on top of it
     for (const s of this.aniSpr.values()) {
       const tx = s.getData("tx"),
         ty = s.getData("ty");
-      if (tx !== undefined) {
-        s.x += (tx - s.x) * 0.15;
-        s.y += (ty - s.y) * 0.15;
-        s.setDepth(s.y);
-      }
+      if (tx === undefined) continue;
+      const vx = (s.getData("gvx") ?? s.x) + (tx - (s.getData("gvx") ?? s.x)) * 0.15;
+      const vy = (s.getData("gvy") ?? s.y) + (ty - (s.getData("gvy") ?? s.y)) * 0.15;
+      s.setData("gvx", vx).setData("gvy", vy);
+      const type: string = s.getData("atype");
+      tickAnimalGait(s, type, dt, ANI_VIEWS[type]);
+      s.x = vx;
+      s.y = vy + (s.getData("gHoverY") || 0);
+      s.setDepth(vy);
     }
 
     // ghost placement preview — modular first: it uses slot geometry, not recipes

@@ -231,6 +231,17 @@ func tileIndex(m map[string]any, key string) (int, bool) {
 
 // jsTruthy mirrors JS truthiness for the one place the legacy server relies on
 // it: `const dir = m.dir ? 1 : 0`.
+// facingDir reads a placement facing: 0–3, the four ways a rotatable piece can
+// face (src/rotation.ts). Anything else — a bad value, a missing field — is 0.
+// An older client's `true` still reads as 1 (JS Number(true)).
+func facingDir(m map[string]any) int {
+	d := getInt32(m, "dir")
+	if d < 0 || d > 3 {
+		return 0
+	}
+	return d
+}
+
 func jsTruthy(m map[string]any, key string) bool {
 	switch v := m[key].(type) {
 	case nil:

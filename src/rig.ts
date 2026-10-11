@@ -16,7 +16,8 @@ import { pickView, type View } from './facing.ts';
  *   Rig (Container)          main.ts owns x / y / depth; face()/faceDir()/setView()
  *                            set the facing, which tick() applies as setScale(±1).
  *                            The rig itself NEVER writes its own x/y.
- *   ├ hull (Image)           boat, only while boating (setBoat) — behind the keeper
+ *   ├ hull (Image)           boat, only while boating (setBoat) — behind the keeper; the
+ *                            hull for the view (HULL), so it points where they row
  *   ├ shadow (Ellipse)       ground shadow shown only mid-jump: the jump frames
  *   │                        have no drawn shadow, and this one stays on the
  *   │                        ground while bodyRoot rises.
@@ -51,6 +52,8 @@ export function makePartTextures(_scene: Phaser.Scene) {}
 const KEEPER_FRAMES: Record<string, string[]> = {};
 const ALL_FRAMES = ['keeper', 'keeper_back', 'keeper_side'];
 const BASE: Record<View, string> = { front: 'keeper', back: 'keeper_back', side: 'keeper_side' };
+/** The hull points where the keeper rows (tools/art/boat-views.mjs); each has a `_near` wall drawn over them. */
+const HULL: Record<View, string> = { front: 'boat_bow', back: 'boat_stern', side: 'boat_side' };
 for (const [c, a, n] of HUMAN_CLIPS) {
   if (c !== 'keeper') continue;
   KEEPER_FRAMES[a] = Array.from({ length: n }, (_, i) => humanFrame(c, a, i + 1));
@@ -231,8 +234,8 @@ export class Rig extends Phaser.GameObjects.Container {
       return;
     }
     if (!this.hull) {
-      this.hull = this.scene.add.image(0, BOAT_Y, 'boat').setOrigin(0.5, 0.6);
-      this.hullFront = this.scene.add.image(0, BOAT_Y, 'boat_front').setOrigin(0.5, 0.6);
+      this.hull = this.scene.add.image(0, BOAT_Y, HULL[this.view]).setOrigin(0.5, 0.6);
+      this.hullFront = this.scene.add.image(0, BOAT_Y, `${HULL[this.view]}_near`).setOrigin(0.5, 0.6);
       this.addAt(this.hull, 0);
       this.add(this.hullFront);
     }
@@ -445,6 +448,8 @@ export class Rig extends Phaser.GameObjects.Container {
     if (this.shadow.visible !== jumping) this.shadow.setVisible(jumping);
     if (jumping) this.shadow.setScale(1 - lift / 40).setAlpha(1 - lift / 30);
     if (this.hull) {
+      const hk = HULL[this.view];
+      if (this.hull.texture.key !== hk) { this.hull.setTexture(hk); this.hullFront!.setTexture(`${hk}_near`); }
       // hull bob + gentle roll; the keeper rides the same values
       this.boatT += dt;
       const bob = Math.sin(this.boatT * 3.2) * BOAT_BOB, roll = Math.sin(this.boatT * 2.1) * 0.025;

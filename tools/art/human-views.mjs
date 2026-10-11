@@ -42,9 +42,9 @@ const CHARS = {
   keeper:         { walk: 8, legs: '#394454', boots: '#382e29', shirt: '#456d89', sheen: '#a9c4c4', skin: '#bf865f', skinO: '#885d47', skinH: '#e5af80', hair: '#4b3028', hairStyle: 'short', gear: true },
   villager:       { walk: 9, legs: '#534738', boots: '#3b3028', shirt: '#80634a', sheen: '#d0b27b', skin: '#bf8b63', skinO: '#896248', skinH: '#e1b18b', hair: '#4b382d', hairStyle: 'short', hat: true, beard: '#6f6154', prop: 'bundle' },
   villager2:      { walk: 9, legs: '#51404b', boots: '#3c3031', shirt: '#795668', sheen: '#d6a69a', skin: '#c89570', skinO: '#946b52', skinH: '#ecc7a2', hair: '#4c3229', hairStyle: 'long', lock: '#5d4031', apron: '#84586a', apronLine: '#a7747e' },
-  woods_child:    { walk: 0, legs: '#625344', boots: '#44382c', shirt: '#50865d', sheen: '#b2ba79', skin: '#bb8960', skinO: '#825a44', skinH: '#e3b083', hair: '#6b462d', hairStyle: 'tousled', collar: '#b1bc7a', prop: 'stick' },
-  ashmark_hunter: { walk: 0, legs: '#534637', boots: '#302b25', shirt: '#66553e', sheen: '#923c2d', skin: '#ab7452', skinO: '#75503c', skinH: '#d49e71', hair: '#292824', hairStyle: 'short', scarf: '#963d2f', hide: '#574b37', pouch: '#4b3c2b', prop: 'spear' },
-  elder_yvenne:   { walk: 0, legs: '#48554d', boots: '#303933', shirt: '#356158', sheen: '#93a77d', skin: '#a47256', skinO: '#6d4a3d', skinH: '#c89470', hair: '#d2c8b5', hairStyle: 'long', lock: '#c3b9aa', robe: '#63856c', robeLine: '#a8b492', prop: 'staff', elder: true },
+  woods_child:    { walk: 8, frontWalk: true, legs: '#625344', boots: '#44382c', shirt: '#50865d', sheen: '#b2ba79', skin: '#bb8960', skinO: '#825a44', skinH: '#e3b083', hair: '#6b462d', hairStyle: 'tousled', collar: '#b1bc7a', prop: 'stick' },
+  ashmark_hunter: { walk: 8, frontWalk: true, legs: '#534637', boots: '#302b25', shirt: '#66553e', sheen: '#923c2d', skin: '#ab7452', skinO: '#75503c', skinH: '#d49e71', hair: '#292824', hairStyle: 'short', scarf: '#963d2f', hide: '#574b37', pouch: '#4b3c2b', prop: 'spear' },
+  elder_yvenne:   { walk: 8, frontWalk: true, legs: '#48554d', boots: '#303933', shirt: '#356158', sheen: '#93a77d', skin: '#a47256', skinO: '#6d4a3d', skinH: '#c89470', hair: '#d2c8b5', hairStyle: 'long', lock: '#c3b9aa', robe: '#63856c', robeLine: '#a8b492', prop: 'staff', elder: true },
   // medics: the long coat's sleeves are the arms' sleeves, so `shirt` is the coat colour
   medic:          { walk: 0, legs: '#5b5747', boots: '#49392d', shirt: '#e3d9be', sheen: '#4f8b6f', skin: '#aa744e', skinO: '#76523d', skinH: '#d7a177', hair: '#414b3c', hairStyle: 'short', beard: '#6f685e', coat: '#e3d9be', coatLine: '#a99d85', strap: '#8b6c4c', bag: '#785b3f', bagMark: '#e9e4c8', trim: '#6e9b77' },
   medic_snow:     { walk: 0, legs: '#596976', boots: '#3c4950', shirt: '#b5d3dd', sheen: '#5d95ae', skin: '#b88764', skinO: '#835e48', skinH: '#e3b48d', hair: '#444f57', hairStyle: 'short', coat: '#b5d3dd', coatLine: '#7199a8', collarV: '#eaf1ed', strap: '#8b6c4c', bag: '#785b3f', bagMark: '#edf4ef', hood: '#dce8e8', hoodLine: '#779bac', flush: '#b5584a' },
@@ -321,6 +321,28 @@ const foot = (ph) => {
   return [-STRIDE + 2 * STRIDE * ease(s), LIFT * Math.sin(Math.PI * s)];
 };
 
+// The pack drew no walk for the child, the hunter or the elder: their front walk is
+// their own front art with its drawn legs swapped for stepping ones (the same legs
+// keeper-frames.mjs gives the keeper), the body bobbing on top.
+const FRONT_LEGS = /<path d="m(?:10 34 5 0|17 34 5 0|9\.7 42|18 42 4\.6)[^>]*\/>\s*/g;
+function frontWalkFrame(name, c, l, r, dy) {
+  const src = read(name);
+  let inner = src.slice(src.indexOf('>') + 1, src.lastIndexOf('</svg>')).trim();
+  const wrap = /^<g transform="[^"]*">/.exec(inner);
+  if (wrap) inner = inner.slice(wrap[0].length, inner.lastIndexOf('</g>'));   // frameOf puts it back
+  const shadow = inner.match(/<ellipse[^>]*\/>/)[0];
+  const bootL = inner.match(/<path d="m9\.7 42[^>]*\/>/)[0], bootR = inner.match(/<path d="m18 42 4\.6[^>]*\/>/)[0];
+  const body = inner.replace(shadow, '').replace(FRONT_LEGS, '');
+  const leg = (boot, hip, ankle, [bx, by], tilt) =>
+    trousers(c, legPath(hip, ankle), false) +
+    `<g transform="translate(${r2(ankle[0] - bx)} ${r2(ankle[1] - by)}) rotate(${r2(tilt)} ${bx} ${by})">${boot}</g>`;
+  const k = 2.4 / STRIDE;   // the keeper's front stride
+  return shadow +
+    leg(bootL, [12.5, 34 + dy], [12.4 + l[0] * k, 42 - l[1]], [12.4, 42], -l[1] * 6) +
+    leg(bootR, [19.5, 34 + dy], [20 + r[0] * k, 42 - r[1]], [20, 42], r[1] * 6) +
+    `<g transform="translate(0 ${r2(dy)})">${body}</g>`;
+}
+
 export {
   SPR, read, write, r2, pad, mix, ease, rad, CHARS, frameOf, SHADOW, DARK, SEG, legPath, trousers, arm, swingArm,
   backTorso, backWear, backHead, backBoot, sideBoot, sideTorso, sideWear, sideHead, foot, STRIDE,
@@ -336,6 +358,7 @@ for (const [name, c] of Object.entries(CHARS)) {
     const ph = (k / c.walk) * 2 * Math.PI;
     const l = foot(ph), r = foot(ph + Math.PI);
     const dy = 0.45 - 0.9 * Math.abs(Math.sin(ph));
+    if (c.frontWalk) write(`${name}_walk_${pad(k)}`, frame(frontWalkFrame(name, c, l, r, dy)));
     // back: forward offset only shifts the foot on screen a little
     write(`${name}_back_walk_${pad(k)}`, frame(backFrame(c, {
       dy, l: [l[0] / STRIDE, l[1]], r: [r[0] / STRIDE, r[1]], swing: -l[0] / STRIDE,

@@ -85,8 +85,10 @@ const LINES: Record<string, string[]> = {
 
 const SHOUTS = ["Blight! Inside, quick!", "They're coming — get in!", "Run!", "To the hut!"];
 
-/** Kinds with full clip sets in HUMAN_CLIPS; the rest are single frames. */
+/** Kinds with full clip sets in HUMAN_CLIPS. */
 const CLIPPED = new Set(["villager", "villager2"]);
+/** Kinds with walk loops only: they work and sit as a single frame with a procedural bob. */
+const WALKERS = new Set(["woods_child", "ashmark_hunter", "elder_yvenne"]);
 /** Stationary acts: played in whichever view the folk member arrived in, no turning mid-act. */
 const STILL_ACTS = new Set(["sit", "collect", "build", "craft"]);
 
@@ -220,7 +222,7 @@ export class FolkView {
     const kind: string = sp.getData("kind"), act: string = sp.getData("act"), view: View = sp.getData("view");
     if (act === "walk" || act === "run") {
       const k = view === "front" ? `${kind}_walk` : `${kind}_${view}_walk`;
-      if (CLIPPED.has(kind) && this.s.anims.exists(k)) {
+      if ((CLIPPED.has(kind) || WALKERS.has(kind)) && this.s.anims.exists(k)) {
         const at = sp.anims.isPlaying ? sp.anims.currentFrame?.index ?? 1 : 1;
         sp.play({ key: k, startFrame: at - 1 });
         sp.anims.timeScale = act === "run" ? 1.7 : 1;
@@ -360,7 +362,7 @@ export class FolkView {
       sp.setData("phase", ph);
       let lift = 0, rot = 0, sy = 1;
       const moving = act === "walk" || act === "run";
-      if (!CLIPPED.has(kind)) {
+      if (!CLIPPED.has(kind) && !(moving && WALKERS.has(kind))) {
         if (moving) {
           lift = Math.abs(Math.sin(ph)) * (act === "run" ? 3 : 1.6);
           rot = Math.sin(ph) * (act === "run" ? 0.09 : 0.05);

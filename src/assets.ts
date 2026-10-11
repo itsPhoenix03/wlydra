@@ -58,6 +58,9 @@ _manifest.push(
   ['diamondore', '/sprites/diamondore.svg',       30, 24],
   ['boat',       '/sprites/boat.svg',             56, 30],
   ['boat_front', '/sprites/boat_front.svg',       56, 30],  // near gunwale, drawn over a seated keeper (rig.ts)
+  // the hull for each rowing direction + its near wall (tools/art/boat-views.mjs, rig.ts HULL)
+  ...['boat_side', 'boat_bow', 'boat_stern'].flatMap((k): [string, string, number, number][] =>
+    [[k, `/sprites/${k}.svg`, 56, 30], [`${k}_near`, `/sprites/${k}_near.svg`, 56, 30]]),
   ['iceberg',    '/sprites/iceberg.svg',          44, 42],
   ['torch',      '/sprites/torch.svg',            16, 34],
   ['note',       '/sprites/note.svg',             26, 30],
@@ -194,6 +197,8 @@ const _BM: [string, number, number][] = [
   ['mod_wall_crystal', 64, 58], ['mod_wall_stone', 64, 54], ['mod_wall_wood', 64, 54],
   ['reed_thatch', 58, 36], ['rope_coil', 44, 38],
   ['stone_blocks', 56, 40], ['wood_planks', 52, 36],
+  // extra facings for four-way rotation (src/rotation.ts, tools/art/rotation-views.mjs)
+  ['mod_door_back', 42, 52], ['mod_banner_blank_back', 34, 54], ['mod_railing_e', 64, 38], ['mod_railing_s', 64, 38],
 ];
 for (const [k, w, h] of _BM) _manifest.push([k, `/sprites/building_materials/${k}.svg`, w, h]);
 const _RAW: [string, number, number][] = [
@@ -223,6 +228,9 @@ export const HUMAN_CLIPS: [string, string, number][] = [
   ['villager', 'back_walk', 9], ['villager', 'side_walk', 9],
   ['villager2', 'walk', 9], ['villager2', 'collect', 9], ['villager2', 'craft', 9], ['villager2', 'sit', 7],
   ['villager2', 'back_walk', 9], ['villager2', 'side_walk', 9],
+  // walks for the folk the pack never animated (tools/art/human-views.mjs)
+  ...['woods_child', 'ashmark_hunter', 'elder_yvenne'].flatMap((c): [string, string, number][] =>
+    [[c, 'walk', 8], [c, 'back_walk', 8], [c, 'side_walk', 8]]),
   ['medic', 'walk', 9], ['medic', 'heal', 9], ['medic', 'prepare', 9],
   ['medic_snow', 'walk', 9], ['medic_snow', 'heal', 9], ['medic_snow', 'prepare', 9], ['medic_snow', 'shiver', 9],
 ];
@@ -240,6 +248,7 @@ const _HUMAN_WIDE = new Set([
 ]);
 const _HUMAN_SIZE: Record<string, [number, number]> = {
   keeper: [32, 48], villager: [32, 48], villager2: [32, 48], medic: [32, 48], medic_snow: [32, 48],   // adults share the keeper's scale
+  woods_child: [30, 42], ashmark_hunter: [32, 48], elder_yvenne: [32, 48],                       // as their base art loads
 };
 export const humanFrame = (char: string, action: string, i: number) =>
   `${char}_${action}_${String(i).padStart(2, '0')}`;
@@ -289,20 +298,22 @@ for (const [tex, [stem, w, h]] of Object.entries(ENEMY_MOTION))
 // the other two live in sprites/views as `<key>_<view>` (+ `_m1..3` motion for enemies) ---
 export const CRE_VIEWS: Record<string, View> = {
   creature: 'front', bog_shambler: 'front', brute: 'front', drowned: 'front', blight_lancer: 'front',
-  stalker: 'side', husk_wolf: 'side',
+  stalker: 'side', husk_wolf: 'side', wisp: 'front', frost_wraith: 'front',
 };
 export const ANI_VIEWS: Record<string, View> = {
   deer: 'side', boar: 'side', lizard: 'side', fox: 'side', hare: 'side', crab: 'front', toad: 'front',
 };
 const ALL_VIEWS: View[] = ['front', 'back', 'side'];
-for (const [table, motion] of [[CRE_VIEWS, true], [ANI_VIEWS, false]] as const)
+for (const [table, wild] of [[CRE_VIEWS, false], [ANI_VIEWS, true]] as const)
   for (const [key, native] of Object.entries(table)) {
     const [, , w, h] = _manifest.find((e) => e[0] === key)!;
     for (const v of ALL_VIEWS) {
-      if (v === native) continue;
-      const k = `${key}_${v}`;
-      _manifest.push([k, `/sprites/views/${k}.svg`, w, h]);
-      if (motion) for (let i = 1; i <= 3; i++) _manifest.push([enemyFrame(k, i), `/sprites/views/${enemyFrame(k, i)}.svg`, w, h]);
+      const k = v === native ? key : `${key}_${v}`;
+      if (v !== native) _manifest.push([k, `/sprites/views/${k}.svg`, w, h]);
+      // walk sets: enemies' native set is ENEMY_MOTION above; wildlife's all live in views/
+      // (tools/art/animal-motion.mjs)
+      if (v !== native || wild)
+        for (let i = 1; i <= 3; i++) _manifest.push([enemyFrame(k, i), `/sprites/views/${enemyFrame(k, i)}.svg`, w, h]);
     }
   }
 

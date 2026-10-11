@@ -549,7 +549,8 @@ wss.on('connection', (ws) => {
       if (kind === 'engine' && !mono.every(Boolean))
         return send(ws, { t: 'msg', s: 'All 4 Monoliths must be awakened first.' });
       p.inv[kind]--;
-      const dir = m.dir ? 1 : 0;
+      // facing 0–3 (src/rotation.ts); anything else is 0, an old client's true is 1
+      const dir = (m.dir | 0) >= 0 && (m.dir | 0) <= 3 ? m.dir | 0 : 0;
       structures.set(i, { kind, hp: STRUCT_HP[kind], owner: id, dir, lvl: 1 });
       bcast({ t: 'build', i, kind, hp: STRUCT_HP[kind], dir, lvl: 1 });
       // farmplot: create empty chest inv stub not needed, but if chest placed, init chestInv
